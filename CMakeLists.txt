@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.0.2)
+cmake_minimum_required(VERSION 3.10.2)
 project(hero_chassis_controller)
 
 ## Compile as C++11, supported in ROS Kinetic and newer
@@ -14,6 +14,7 @@ find_package(catkin REQUIRED COMPONENTS
   pluginlib
   roscpp
   roslint
+        std_msgs
 )
 
 ## System dependencies are found with CMake's conventions
@@ -119,14 +120,14 @@ catkin_package(
 ## Specify additional locations of header files
 ## Your package locations should be listed before other locations
 include_directories(
-# include
+  include
   ${catkin_INCLUDE_DIRS}
 )
 
 ## Declare a C++ library
-# add_library(${PROJECT_NAME}
-#   src/${PROJECT_NAME}/hero_chassis_controller.cpp
-# )
+add_library(hero_chassis_controller
+    src/hero_chassis_controller.cpp
+)
 
 ## Add cmake target dependencies of the library
 ## as an example, code may need to be generated before libraries
@@ -207,3 +208,8 @@ include_directories(
 
 ## Add folders to be run by python nosetests
 # catkin_add_nosetests(test)
+
+add_executable(talker_listener src/talker_listener.cpp)
+target_link_libraries(talker_listener
+${catkin_LIBRARIES}
+)

@@ -1,0 +1,93 @@
+---
+header: 
+  seq: 1815
+  stamp: 
+    secs: 36
+    nsecs: 321000000
+  frame_id: ''
+name: 
+  - left_back_wheel_joint
+  - left_front_wheel_joint
+  - right_back_wheel_joint
+  - right_front_wheel_joint
+position: [-56.454973320328236, -6.859923205458323, -175.0715606425446, -222.49535530529894]
+velocity: [-1.4549053553483469, -2.3938970883707174, 5.468772168558156, 5.949314691509099]
+effort: [0.2, 0.2, 0.2, 0.2] # tau = 0.2 前进
+---
+header: 
+  seq: 1988
+  stamp: 
+    secs: 39
+    nsecs: 781000000
+  frame_id: ''
+name: 
+  - left_back_wheel_joint
+  - left_front_wheel_joint
+  - right_back_wheel_joint
+  - right_front_wheel_joint
+position: [-56.13213668740639, -5.903052015365184, -170.0305284389873, -218.03127329852177]
+velocity: [-13.972609951950075, -14.65101459293593, -14.340464446244534, -14.267971193983627]
+effort: [-0.4, -0.4, -0.4, -0.4] # tau = -0.4 后退
+---
+header: 
+  seq: 2080
+  stamp: 
+    secs: 41
+    nsecs: 621000000
+  frame_id: ''
+name: 
+  - left_back_wheel_joint
+  - left_front_wheel_joint
+  - right_back_wheel_joint
+  - right_front_wheel_joint
+position: [-75.37210557685943, -35.48141147377203, -198.8350260984612, -236.5642879163638]
+velocity: [-4.816736277140338, -14.085621162689078, -14.091009112424885, -4.401799563981991]
+effort: [0.2, -0.2, -0.2, 0.2] # 向左
+---
+header: 
+  seq: 2180
+  stamp: 
+    secs: 43
+    nsecs: 621000000
+  frame_id: ''
+name: 
+  - left_back_wheel_joint
+  - left_front_wheel_joint
+  - right_back_wheel_joint
+  - right_front_wheel_joint
+position: [-92.40758250745836, -42.731547871982634, -206.5299147338088, -254.13305474535284]
+velocity: [-12.697968028708614, 5.211033106878862, 4.495602545319693, -13.468258964871552]
+effort: [-0.4, 0.4, 0.4, -0.4] # 向右
+---
+header: 
+  seq: 2272
+  stamp: 
+    secs: 45
+    nsecs: 461000000
+  frame_id: ''
+name: 
+  - left_back_wheel_joint
+  - left_front_wheel_joint
+  - right_back_wheel_joint
+  - right_front_wheel_joint
+position: [-82.74000860651232, -15.720770254701169, -217.6056827954676, -282.2652474810869]
+velocity: [23.783388878169063, 21.14611346949795, -19.225144483501506, -16.584673201350196]
+effort: [0.4, 0.4, -0.4, -0.4] # 顺时针转
+---
+header: 
+  seq: 4800
+  stamp: 
+    secs: 96
+    nsecs:  21000000
+  frame_id: ''
+name: 
+  - left_back_wheel_joint
+  - left_front_wheel_joint
+  - right_back_wheel_joint
+  - right_front_wheel_joint
+position: [-140.0962915789716, -22.537109471958882, -477.7304369676352, -589.8796487414597]
+velocity: [-4.8661593424023, -9.013917934648788, -3.6250542118358844, 7.6748038770007945]
+effort: [-0.2, -0.2, 0.2, 0.2] # 逆时针转
+---
+
+
