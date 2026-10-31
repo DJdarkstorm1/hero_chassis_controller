@@ -11,6 +11,7 @@ void talkercb(std_msgs::String msg)
 
 int main(int argc, char **argv)
 {
+    setlocale(LC_ALL, "");
     ros::init(argc, argv, "talker_listener");
     ros::NodeHandle n;
     ros::Publisher pub = n.advertise<std_msgs::String>("talker", 100);

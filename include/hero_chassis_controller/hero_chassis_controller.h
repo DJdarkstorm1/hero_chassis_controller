@@ -8,8 +8,10 @@
 #include <control_toolbox/pid.h>
 #include <controller_interface/controller.h>
 #include <hardware_interface/joint_command_interface.h>
-#include <realtime_tools/realtime_publisher.h>
-#include <control_msgs/JointControllerState.h>
+#include <geometry_msgs/Twist.h>
+#include <tf/transform_broadcaster.h>
+#include <nav_msgs/Odometry.h>
+#include <vector>
 
 namespace hero_chassis_controller {
 
@@ -24,26 +26,29 @@ namespace hero_chassis_controller {
 
         void update(const ros::Time &time, const ros::Duration &period) override;
 
+        void cmdVelCallback(const geometry_msgs::Twist &msg);
         hardware_interface::JointHandle front_left_joint_,
                                         front_right_joint_,
                                         back_left_joint_,
                                         back_right_joint_;
-
-        double command_; //最新速度命令
+        std::vector<hardware_interface::JointHandle> joints_;
+        std::vector<double> commands_{0.0, 0.0, 0.0, 0.0}; //最新速度命令
     private:
-        //pid接口,参考joint_velocity_controller.h
-        int loop_count_;
+        //机器人基本参数
+        double wheel_base_;//前后轴距
+        double wheel_radius_;//轮子半径
+        double wheel_track_;//左右轮距
+
 
         control_toolbox::Pid fl_pid_, fr_pid_, bl_pid_, br_pid_;
+        std::vector<control_toolbox::Pid> pids_;
 
-        std::unique_ptr<
-                        realtime_tools::RealtimePublisher<
-                        control_msgs::JointControllerState> > fl_controller_state_publisher_,
-                                                              fr_controller_state_publisher_,
-                                                              bl_controller_state_publisher_,
-                                                              br_controller_state_publisher_;
+        //订阅速度命令
         ros::Subscriber sub_command_;
-
+        //发布odom话题
+        ros::Publisher odom_pub_ ;
+        ros::Subscriber odom_sub_;//订阅/joint_states
+        tf::TransformBroadcaster odom_broadcaster_;
 
     };
 }// namespace hero_chassis_controller
