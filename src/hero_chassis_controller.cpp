@@ -5,6 +5,8 @@
 #include "hero_chassis_controller/hero_chassis_controller.h"
 #include <pluginlib/class_list_macros.hpp>
 
+#include <tf2/LinearMath/Quaternion.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 
 namespace hero_chassis_controller {
 bool HeroChassisController::init(hardware_interface::EffortJointInterface *effort_joint_interface,
@@ -46,15 +48,70 @@ bool HeroChassisController::init(hardware_interface::EffortJointInterface *effor
     commands_.assign(4, 0.0);
     sub_command_ = root_nh.subscribe("cmd_vel", 1, &HeroChassisController::cmdVelCallback, this);
 
-    //odom消息
-    odom_pub_ = root_nh.advertise<nav_msgs::Odometry>("odom", 50);
-    ros::Subscriber("/joint_states",1,)
+    //odom
+    w_.assign(4, 0.0);//关节角速度
+    odom_pub_ = root_nh.advertise<nav_msgs::Odometry>("odom", 100);
     return true;
 }
 
-void odom_pub_callback(const nav_msgs::Odometry &odom)
+void HeroChassisController::odom_tf(const ros::Time &time, const ros::Duration &period)
 {
+    //正运动学解算
 
+    for(int i = 0; i < 4; i++) {
+        w_[i] = joints_[i].getVelocity();
+    }
+
+    double v_x = ( w_[0]+w_[1]+w_[2]+w_[3])*wheel_radius_/4;
+    double v_y = (-w_[0]+w_[1]+w_[2]-w_[3])*wheel_radius_/4;
+    double w_z = (-w_[0]+w_[1]-w_[2]+w_[3])*wheel_radius_/(4*(wheel_base_+wheel_track_));
+
+    double dt = period.toSec();
+    double delta_x = (v_x * cos(th_) - v_y * sin(th_)) * dt;
+    double delta_y = (v_x * sin(th_) + v_y * cos(th_)) * dt;
+    double delta_th = w_z * dt;
+    x_ += delta_x;
+    y_ += delta_y;
+    th_ += delta_th;
+    //在2维平面只要Yaw
+    tf2::Quaternion q;
+    q.setRPY(0, 0, th_);
+    geometry_msgs::Quaternion odom_quat = tf2::toMsg(q);
+
+    geometry_msgs::TransformStamped odom_trans;
+    odom_trans.header.stamp = time;
+    odom_trans.header.frame_id = "odom";
+    odom_trans.child_frame_id = "base_link";
+
+    odom_trans.transform.translation.x = x_;
+    odom_trans.transform.translation.y = y_;
+    odom_trans.transform.translation.z = 0.0;
+    odom_trans.transform.rotation = odom_quat;
+
+    odom_broadcaster_.sendTransform(odom_trans);
+
+    nav_msgs::Odometry odom;
+    odom.header.stamp = time;
+    odom.header.frame_id = "odom";
+
+    odom.pose.pose.position.x = x_;
+    odom.pose.pose.position.y = y_;
+    odom.pose.pose.position.z = 0.0;
+    odom.pose.pose.orientation = odom_quat;
+
+    // 设置速度
+    odom.child_frame_id = "base_link";
+
+
+    v_x_smoothed_ = alpha_ * v_x + (1.0 - alpha_) * v_x_smoothed_;
+    v_y_smoothed_ = alpha_ * v_y + (1.0 - alpha_) * v_y_smoothed_;
+    w_z_smoothed_ = alpha_ * w_z + (1.0 - alpha_) * w_z_smoothed_;
+    odom.twist.twist.linear.x  = v_x_smoothed_;
+    odom.twist.twist.linear.y  = v_y_smoothed_;
+    odom.twist.twist.angular.z = w_z_smoothed_;//w_z;
+
+    // 发布消息
+    odom_pub_.publish(odom);
 }
 
 void HeroChassisController::cmdVelCallback(const geometry_msgs::Twist &msg)
@@ -101,7 +158,8 @@ void HeroChassisController::update(const ros::Time &time, const ros::Duration &p
     {
         joints_[i].setCommand(commanded_efforts[i]);
     }
-
+    //正运动学解算+odom发布
+    odom_tf(time,period);
 }
 
 

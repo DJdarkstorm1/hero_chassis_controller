@@ -1,4 +1,9 @@
 <launch>
+  <param name="robot_description"
+             command="$(find xacro)/xacro '$(find rm_description_for_task)/urdf/hero/hero.urdf.xacro'" />
+  <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher"
+            output="screen"/>
+
   <include file="$(find rm_description_for_task)/launch/hero.launch">
     <arg name="load_chassis" value="true"/>
     <arg name="roller_type" value="realistic"/>
@@ -12,5 +17,5 @@
         controller/hero_chassis_controller
         controller/joint_state_controller
   "/>
-
+  <node pkg="rviz" type="rviz" name="rviz" args="-d $(find hero_chassis_controller)/config/config.rviz"/>
 </launch>
