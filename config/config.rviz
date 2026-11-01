@@ -7,7 +7,6 @@ Panels:
         - /Global Options1
         - /Status1
         - /RobotModel1
-        - /RobotModel1/Status1
         - /TF1
         - /TF1/Frames1
       Splitter Ratio: 0.5
@@ -423,6 +422,18 @@ Visualization Manager:
       Frame Timeout: 15
       Frames:
         All Enabled: true
+        base_link:
+          Value: true
+        left_back_wheel:
+          Value: true
+        left_front_wheel:
+          Value: true
+        odom:
+          Value: true
+        right_back_wheel:
+          Value: true
+        right_front_wheel:
+          Value: true
       Marker Alpha: 1
       Marker Scale: 1
       Name: TF
@@ -430,14 +441,23 @@ Visualization Manager:
       Show Axes: true
       Show Names: true
       Tree:
-        {}
+        odom:
+          base_link:
+            left_back_wheel:
+              {}
+            left_front_wheel:
+              {}
+            right_back_wheel:
+              {}
+            right_front_wheel:
+              {}
       Update Interval: 0
       Value: true
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
     Default Light: true
-    Fixed Frame: map
+    Fixed Frame: odom
     Frame Rate: 30
   Name: root
   Tools:
@@ -497,5 +517,5 @@ Window Geometry:
   Views:
     collapsed: true
   Width: 1200
-  X: 59
-  Y: 154
+  X: 1360
+  Y: 717

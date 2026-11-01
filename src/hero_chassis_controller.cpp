@@ -37,13 +37,12 @@ bool HeroChassisController::init(hardware_interface::EffortJointInterface *effor
     pids_.push_back(br_pid_);
 
     //机器人基本参数
-    //ros::param::get("wheel_base",wheel_base_);//前后轴距
-//
-    //ros::param::get("wheel_radius",wheel_radius_);;//轮子半径
-    //ros::param::get("wheel_track",wheel_track_);;//左右轮距
-    wheel_base_ = 0.4;
-    wheel_track_ = 0.4;
-    wheel_radius_ = 0.07625;
+    controller_nh.getParam("wheel_base",wheel_base_);//前后轴距
+    controller_nh.getParam("wheel_radius",wheel_radius_);;//轮子半径
+    controller_nh.getParam("wheel_track",wheel_track_);;//左右轮距
+    //wheel_base_ = 0.4;
+    //wheel_track_ = 0.4;
+    //wheel_radius_ = 0.07625;
     //速度
     commands_.assign(4, 0.0);
     sub_command_ = root_nh.subscribe("cmd_vel", 1, &HeroChassisController::cmdVelCallback, this);
@@ -51,7 +50,25 @@ bool HeroChassisController::init(hardware_interface::EffortJointInterface *effor
     //odom
     w_.assign(4, 0.0);//关节角速度
     odom_pub_ = root_nh.advertise<nav_msgs::Odometry>("odom", 100);
+
+    //底盘/全局
+    tf_buffer_ = std::make_unique<tf2_ros::Buffer>();
+    tf_listener_ = std::make_unique<tf2_ros::TransformListener>(*tf_buffer_);
+    tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>();
+    controller_nh.param<std::string>("odom_frame", odom_frame_, "odom");
+    controller_nh.param<std::string>("base_frame", base_frame_, "base_link");
+    //controller_nh.param("global_frame_mode", global_frame_mode_, false);
+    dyn_server_ = std::make_unique<dynamic_reconfigure::Server<
+      hero_chassis_controller::global_modeConfig>>(
+      ros::NodeHandle(controller_nh, "global_frame_mode"));
+    dyn_server_->setCallback(
+      boost::bind(&HeroChassisController::dynReconfCallback, this, _1, _2));
     return true;
+}
+
+void HeroChassisController::dynReconfCallback(hero_chassis_controller::global_modeConfig &config,uint32_t level)
+{
+    global_frame_mode_ =config.global_frame_mode;
 }
 
 void HeroChassisController::odom_tf(const ros::Time &time, const ros::Duration &period)
@@ -117,9 +134,48 @@ void HeroChassisController::odom_tf(const ros::Time &time, const ros::Duration &
 void HeroChassisController::cmdVelCallback(const geometry_msgs::Twist &msg)
 {
     //逆运动学解算
-    double vel_x = msg.linear.x;
-    double vel_y = msg.linear.y;
-    double vel_rad = msg.angular.z;
+    double vel_x = 0.0;
+    double vel_y = 0.0;
+    double vel_rad  = 0.0;
+
+    //底盘/全局
+    if (global_frame_mode_) {
+        try {
+            // 1. 查询 odom → base_link 的变换
+            //    参数顺序："target_frame", "source_frame", time
+            //    返回的 transform 表示把 source 中的数据变换到 target
+            geometry_msgs::TransformStamped transform_stamped =
+                tf_buffer_->lookupTransform(
+                    base_frame_,   // 子坐标系
+                    odom_frame_,   // 父坐标系
+                    ros::Time(0),
+                    ros::Duration(0.1));  // 超时 100ms，避免阻塞太久
+
+            // 2. 取出旋转部分，转成 tf2::Quaternion
+            tf2::Quaternion q;
+            tf2::fromMsg(transform_stamped.transform.rotation, q);
+
+            // 3. 用四元数旋转线速度向量（速度是自由向量，只旋转不平移）
+            tf2::Vector3 v_world(msg.linear.x, msg.linear.y, 0.0);
+            tf2::Vector3 v_body = tf2::quatRotate(q, v_world);
+
+            // 4. 写回 Twist（angular.z 在平面运动中不变）
+            vel_x = v_body.x();
+            vel_y = v_body.y();
+
+        } catch (const tf2::TransformException& ex) {
+            ROS_WARN_THROTTLE(1.0,
+                "TF2 lookup %s -> %s failed: %s, using original command",
+                odom_frame_.c_str(), base_frame_.c_str(), ex.what());
+        }
+    }
+    else
+    {
+        vel_x = msg.linear.x;
+        vel_y = msg.linear.y;
+
+    }
+    vel_rad = msg.angular.z;
 
     double fl_vel = (vel_x - vel_y -(wheel_base_+wheel_track_)*vel_rad)/wheel_radius_;
     double fr_vel = (vel_x + vel_y +(wheel_base_+wheel_track_)*vel_rad)/wheel_radius_;

@@ -21,6 +21,12 @@ controller:
       i: 1.0
       d: 0.0
       i_clamp: 10.0
+    odom_frame: odom
+    base_frame: base_link
+    global_frame_mode: true
+    wheel_base: 0.4
+    wheel_radius: 0.07625
+    wheel_track: 0.4
 
   joint_state_controller:
     type: joint_state_controller/JointStateController

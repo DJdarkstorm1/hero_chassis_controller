@@ -9,9 +9,17 @@
 #include <controller_interface/controller.h>
 #include <hardware_interface/joint_command_interface.h>
 #include <geometry_msgs/Twist.h>
-#include <tf2_ros/transform_broadcaster.h>
 #include <nav_msgs/Odometry.h>
 #include <vector>
+#include <string>
+#include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_listener.h>
+#include <tf2_ros/transform_broadcaster.h>
+#include <tf2/LinearMath/Vector3.h>
+#include <tf2/LinearMath/Quaternion.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
+#include <dynamic_reconfigure/server.h>
+#include <hero_chassis_controller/global_modeConfig.h>
 
 namespace hero_chassis_controller {
 
@@ -29,6 +37,8 @@ namespace hero_chassis_controller {
         void cmdVelCallback(const geometry_msgs::Twist &msg);
 
         void odom_tf(const ros::Time &time, const ros::Duration &period);
+
+        void dynReconfCallback(hero_chassis_controller::global_modeConfig &config,uint32_t level);
 
         hardware_interface::JointHandle front_left_joint_,
                                         front_right_joint_,
@@ -62,10 +72,21 @@ namespace hero_chassis_controller {
         double v_x_smoothed_ = 0.0;
         double v_y_smoothed_ = 0.0;
         double w_z_smoothed_ = 0.0;
+
         //发布odom话题
         ros::Publisher odom_pub_ ;
         tf2_ros::TransformBroadcaster odom_broadcaster_;
 
+        //底盘/全局
+        bool global_frame_mode_ = false;
+        std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
+        std::unique_ptr<tf2_ros::TransformListener> tf_listener_;
+        std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
+        std::string odom_frame_;
+        std::string base_frame_;
+        //动态参数调节模式
+        std::unique_ptr<dynamic_reconfigure::Server<
+            hero_chassis_controller::global_modeConfig>> dyn_server_;
     };
 }// namespace hero_chassis_controller
 
