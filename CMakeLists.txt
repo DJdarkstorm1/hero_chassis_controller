@@ -19,6 +19,8 @@ find_package(catkin REQUIRED COMPONENTS
         tf2_ros
         geometry_msgs
         dynamic_reconfigure
+        urdf
+        joint_limits_interface
 )
 
 ## System dependencies are found with CMake's conventions

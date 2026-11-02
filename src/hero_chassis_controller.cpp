@@ -7,11 +7,14 @@
 
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
+#include <urdf/model.h>
+#include <joint_limits_interface/joint_limits_urdf.h>
 
 namespace hero_chassis_controller {
 bool HeroChassisController::init(hardware_interface::EffortJointInterface *effort_joint_interface,
                                    ros::NodeHandle &root_nh, ros::NodeHandle &controller_nh) {
     setlocale(LC_ALL, "");
+    //关节力控接口
     //0:fl 1:fr 2:bl 3br
     front_left_joint_ =
       effort_joint_interface->getHandle("left_front_wheel_joint");
@@ -21,10 +24,7 @@ bool HeroChassisController::init(hardware_interface::EffortJointInterface *effor
       effort_joint_interface->getHandle("left_back_wheel_joint");
     back_right_joint_ =
       effort_joint_interface->getHandle("right_back_wheel_joint");
-    joints_.push_back(front_left_joint_);
-    joints_.push_back(front_right_joint_);
-    joints_.push_back(back_left_joint_);
-    joints_.push_back(back_right_joint_);
+    joints_ = {front_left_joint_,front_right_joint_,back_left_joint_,back_right_joint_};
 
     //初始化PID
     fl_pid_.init(ros::NodeHandle(controller_nh, "fl_pid"));
@@ -36,39 +36,91 @@ bool HeroChassisController::init(hardware_interface::EffortJointInterface *effor
     pids_.push_back(bl_pid_);
     pids_.push_back(br_pid_);
 
-    //机器人基本参数
-    controller_nh.getParam("wheel_base",wheel_base_);//前后轴距
-    controller_nh.getParam("wheel_radius",wheel_radius_);;//轮子半径
-    controller_nh.getParam("wheel_track",wheel_track_);;//左右轮距
-    //wheel_base_ = 0.4;
-    //wheel_track_ = 0.4;
-    //wheel_radius_ = 0.07625;
-    //速度
+    //底盘参数
+    controller_nh.param("wheel_base",wheel_base_,0.4);//前后轴距
+    controller_nh.param("wheel_radius",wheel_radius_,0.07625);;//轮子半径
+    controller_nh.param("wheel_track",wheel_track_,0.4);;//左右轮距
+
+    //加速度限制参数
+    controller_nh.param("max_lin_acc_x", max_lin_acc_x_, 2.0);
+    controller_nh.param("max_lin_dec_x", max_lin_dec_x_, 4.0);
+    controller_nh.param("max_lin_acc_y", max_lin_acc_y_, 2.0);
+    controller_nh.param("max_lin_dec_y", max_lin_dec_y_, 4.0);
+    controller_nh.param("max_ang_acc_z", max_ang_acc_z_, 4.0);
+    controller_nh.param("max_ang_dec_z", max_ang_dec_z_, 8.0);
+    last_smoothed_cmd_ = geometry_msgs::Twist();
+
+    //joint_limits力矩限制从URDF文件读取
+    urdf::Model model;
+    if (!model.initParam("robot_description")) {
+        ROS_ERROR("Failed to parse robot description");
+        return false;
+    }
+
+    // 2. 为每个关节获取 limits
+    const std::vector<std::string> joint_names = {
+        "left_front_wheel_joint", "right_front_wheel_joint",
+        "left_back_wheel_joint",  "right_back_wheel_joint"};
+
+    for (size_t i = 0; i < joint_names.size(); ++i) {
+        joint_limits_interface::JointLimits limits;
+
+        // 3. 从 model 中获取对应的 urdf::Joint 指针
+        urdf::JointConstSharedPtr urdf_joint = model.getJoint(joint_names[i]);
+        if (!urdf_joint) {
+            ROS_WARN("Joint '%s' not found in URDF model", joint_names[i].c_str());
+            continue;
+        }
+
+        // 4. 调用 URDF 版本的 getJointLimits
+        if (joint_limits_interface::getJointLimits(urdf_joint, limits)) {
+            // 函数会自动将 URDF 中的 <limit effort="..."> 解析到 limits.max_effort
+            effort_limit_handles_.emplace_back(joints_[i], limits);
+            ROS_INFO("Joint limit enabled for %s, max_effort=%.2f",
+                     joint_names[i].c_str(), limits.max_effort);
+        } else {
+            ROS_WARN("Joint '%s' has no valid limits specification in URDF", joint_names[i].c_str());
+        }
+    }
+
+    //cmd_vel速度话题订阅
     commands_.assign(4, 0.0);
     sub_command_ = root_nh.subscribe("cmd_vel", 1, &HeroChassisController::cmdVelCallback, this);
 
-    //odom
+    //odom里程计
     w_.assign(4, 0.0);//关节角速度
     odom_pub_ = root_nh.advertise<nav_msgs::Odometry>("odom", 100);
 
-    //底盘/全局
+    //底盘/全局模式
     tf_buffer_ = std::make_unique<tf2_ros::Buffer>();
     tf_listener_ = std::make_unique<tf2_ros::TransformListener>(*tf_buffer_);
     tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>();
     controller_nh.param<std::string>("odom_frame", odom_frame_, "odom");
     controller_nh.param<std::string>("base_frame", base_frame_, "base_link");
-    //controller_nh.param("global_frame_mode", global_frame_mode_, false);
+
+    //动态参数
     dyn_server_ = std::make_unique<dynamic_reconfigure::Server<
       hero_chassis_controller::global_modeConfig>>(
       ros::NodeHandle(controller_nh, "global_frame_mode"));
     dyn_server_->setCallback(
       boost::bind(&HeroChassisController::dynReconfCallback, this, _1, _2));
+
     return true;
+}
+
+void HeroChassisController::starting(const ros::Time& time)
+{
+    //重置速度平滑状态
+    last_smoothed_cmd_ = geometry_msgs::Twist();
+    //重置里程计参数
+    x_ = 0.0;
+    y_ = 0.0;
+    th_ = 0.0;
 }
 
 void HeroChassisController::dynReconfCallback(hero_chassis_controller::global_modeConfig &config,uint32_t level)
 {
-    global_frame_mode_ =config.global_frame_mode;
+    global_frame_mode_ = config.global_frame_mode;
 }
 
 void HeroChassisController::odom_tf(const ros::Time &time, const ros::Duration &period)
@@ -97,29 +149,25 @@ void HeroChassisController::odom_tf(const ros::Time &time, const ros::Duration &
 
     geometry_msgs::TransformStamped odom_trans;
     odom_trans.header.stamp = time;
-    odom_trans.header.frame_id = "odom";
-    odom_trans.child_frame_id = "base_link";
+    odom_trans.header.frame_id = odom_frame_;
+    odom_trans.child_frame_id = base_frame_;
 
     odom_trans.transform.translation.x = x_;
     odom_trans.transform.translation.y = y_;
     odom_trans.transform.translation.z = 0.0;
     odom_trans.transform.rotation = odom_quat;
 
-    odom_broadcaster_.sendTransform(odom_trans);
+    tf_broadcaster_->sendTransform(odom_trans);
 
     nav_msgs::Odometry odom;
     odom.header.stamp = time;
-    odom.header.frame_id = "odom";
-
+    odom.header.frame_id = odom_frame_;
+    odom.child_frame_id = base_frame_;
     odom.pose.pose.position.x = x_;
     odom.pose.pose.position.y = y_;
     odom.pose.pose.position.z = 0.0;
     odom.pose.pose.orientation = odom_quat;
-
-    // 设置速度
-    odom.child_frame_id = "base_link";
-
-
+    // 设置速度(加了滤波)
     v_x_smoothed_ = alpha_ * v_x + (1.0 - alpha_) * v_x_smoothed_;
     v_y_smoothed_ = alpha_ * v_y + (1.0 - alpha_) * v_y_smoothed_;
     w_z_smoothed_ = alpha_ * w_z + (1.0 - alpha_) * w_z_smoothed_;
@@ -133,35 +181,29 @@ void HeroChassisController::odom_tf(const ros::Time &time, const ros::Duration &
 
 void HeroChassisController::cmdVelCallback(const geometry_msgs::Twist &msg)
 {
-    //逆运动学解算
-    double vel_x = 0.0;
-    double vel_y = 0.0;
-    double vel_rad  = 0.0;
+    geometry_msgs::Twist cmd = msg;
 
     //底盘/全局
     if (global_frame_mode_) {
         try {
-            // 1. 查询 odom → base_link 的变换
-            //    参数顺序："target_frame", "source_frame", time
-            //    返回的 transform 表示把 source 中的数据变换到 target
             geometry_msgs::TransformStamped transform_stamped =
                 tf_buffer_->lookupTransform(
                     base_frame_,   // 子坐标系
                     odom_frame_,   // 父坐标系
                     ros::Time(0),
-                    ros::Duration(0.1));  // 超时 100ms，避免阻塞太久
+                    ros::Duration(0.1));
 
-            // 2. 取出旋转部分，转成 tf2::Quaternion
+            // 取出旋转部分，转成 tf2::Quaternion
             tf2::Quaternion q;
             tf2::fromMsg(transform_stamped.transform.rotation, q);
 
-            // 3. 用四元数旋转线速度向量（速度是自由向量，只旋转不平移）
-            tf2::Vector3 v_world(msg.linear.x, msg.linear.y, 0.0);
+            // 用四元数旋转线速度向量（速度是自由向量，只旋转不平移）
+            tf2::Vector3 v_world(cmd.linear.x, cmd.linear.y, 0.0);
             tf2::Vector3 v_body = tf2::quatRotate(q, v_world);
 
-            // 4. 写回 Twist（angular.z 在平面运动中不变）
-            vel_x = v_body.x();
-            vel_y = v_body.y();
+            cmd.linear.x = v_body.x();
+            cmd.linear.y= v_body.y();
+            //Yaw旋转不必转换
 
         } catch (const tf2::TransformException& ex) {
             ROS_WARN_THROTTLE(1.0,
@@ -169,13 +211,95 @@ void HeroChassisController::cmdVelCallback(const geometry_msgs::Twist &msg)
                 odom_frame_.c_str(), base_frame_.c_str(), ex.what());
         }
     }
-    else
-    {
-        vel_x = msg.linear.x;
-        vel_y = msg.linear.y;
 
+    raw_cmd_buffer_.writeFromNonRT(cmd);
+
+}
+
+void HeroChassisController::applyVelocityLimits(geometry_msgs::Twist& cmd,const ros::Duration& period)
+{
+    //记录时间间隔
+    const double dt = period.toSec();
+    if (dt <= 0.0) return;
+
+    //线速度:vx,vy合成为合成增量
+    const double vx_cur = last_smoothed_cmd_.linear.x;
+    const double vy_cur = last_smoothed_cmd_.linear.y;
+    const double vx_inc  = cmd.linear.x - vx_cur;//计算增量
+    const double vy_inc  = cmd.linear.y - vy_cur;
+
+    const double linear_inc_mag = std::hypot(vx_inc, vy_inc);//计算目标直线增量的模
+    const double linear_cur_mag = std::hypot(vx_cur, vy_cur);//计算当前速度向量的模
+    const double linear_tgt_mag = std::hypot(cmd.linear.x, cmd.linear.y);//目标速度向量的模
+
+    //判断加/减速：看合成速度幅值是变大还是变小
+    const bool linear_acc = linear_tgt_mag >= linear_cur_mag;
+    const double max_linear_inc_x = (linear_acc ? max_lin_acc_x_ : max_lin_dec_x_)*dt;//计算最大速度增量
+    const double max_linear_inc_y = (linear_acc ? max_lin_acc_y_ : max_lin_dec_y_)*dt;
+    const double max_linear_inc = std::hypot(max_linear_inc_x, max_linear_inc_y);//最大增量的模
+
+    //角速度：(同理)
+    const double wz_cur = last_smoothed_cmd_.angular.z;
+    const double wz_inc  = cmd.angular.z - wz_cur;
+    const bool wz_acc = (std::abs(cmd.angular.z) >= std::abs(wz_cur));
+    const double max_wz_inc = (wz_acc ? max_ang_acc_z_ : max_ang_dec_z_)*dt;
+
+    //联合约束，保证前进方向
+    double allowed_linear_inc = max_linear_inc;
+    double allowed_wz_inc = max_wz_inc;
+
+    if (linear_inc_mag > 1e-9 && std::abs(wz_inc)>1e-9)
+    {
+        const double MA = std::hypot(linear_inc_mag,std::abs(wz_inc));
+        const double MB = std::hypot(max_linear_inc,std::abs(wz_inc));
+        const double Av = linear_inc_mag/MA;
+        const double Aw = std::abs(wz_inc)/MA;
+        const double Bv = max_linear_inc/MB;
+        const double Bw = max_wz_inc/MB;
+        const double theta = std::atan2(Bw,Bv) - std::atan2(Aw,Bv);
+
+        if (theta > 0.0)
+        {
+            //角速度方向更陡，压缩合成直线增量，保持 vx:vy 比例
+            allowed_linear_inc = max_wz_inc*linear_inc_mag/std::abs(wz_inc);
+        }
+        else
+        {
+            //直线方向更陡，压缩角速度增量
+            allowed_wz_inc = max_linear_inc*std::abs(wz_inc)/linear_inc_mag;
+        }
     }
-    vel_rad = msg.angular.z;
+
+    double linear_scale = 1.0;
+    if (linear_inc_mag > 1e-9 && linear_inc_mag > allowed_linear_inc)
+    {
+        linear_scale = allowed_linear_inc/linear_inc_mag;
+    }
+    cmd.linear.x = vx_cur + vx_inc * linear_scale;
+    cmd.linear.y = vy_cur + vy_inc * linear_scale;
+
+    if (std::abs(wz_inc) > allowed_wz_inc ) {
+        cmd.angular.z = wz_cur + (wz_inc > 0 ? 1.0 : -1.0 ) * allowed_wz_inc;
+    }
+    else {
+        cmd.angular.z = wz_cur + wz_inc ;
+    }
+
+    last_smoothed_cmd_ = cmd;//更新速度平滑后的状态
+
+}
+
+void HeroChassisController::update(const ros::Time &time, const ros::Duration &period) {
+    if (joints_.empty()) return;
+
+    //加速度限制
+    geometry_msgs::Twist cmd = *raw_cmd_buffer_.readFromRT();
+    applyVelocityLimits(cmd, period);
+
+    //逆运动学解算
+    double vel_x = cmd.linear.x;
+    double vel_y = cmd.linear.y;
+    double vel_rad  = cmd.angular.z;
 
     double fl_vel = (vel_x - vel_y -(wheel_base_+wheel_track_)*vel_rad)/wheel_radius_;
     double fr_vel = (vel_x + vel_y +(wheel_base_+wheel_track_)*vel_rad)/wheel_radius_;
@@ -184,30 +308,22 @@ void HeroChassisController::cmdVelCallback(const geometry_msgs::Twist &msg)
 
     ROS_INFO("轮距：%f,轴距：%f,轮半径：%f",wheel_track_,wheel_base_,wheel_radius_);
     ROS_INFO("cmd_vel: linear:[%f, %f], angular:%f", vel_x, vel_y, vel_rad);
-
-    commands_[0]= fl_vel;//转动关节为角速度，要换算为先速度
-    commands_[1]= fr_vel;//转动关节为角速度，要换算为先速度
-    commands_[2]= bl_vel;//转动关节为角速度，要换算为先速度
-    commands_[3]= br_vel;//转动关节为角速度，要换算为先速度
     ROS_INFO("fl:%f, fr:%f, bl:%f, br:%f",fl_vel*wheel_radius_,fr_vel*wheel_radius_,bl_vel*wheel_radius_,br_vel*wheel_radius_);
 
-}
 
-void HeroChassisController::update(const ros::Time &time, const ros::Duration &period) {
-    if (joints_.empty()) return;
+    commands_[0]= fl_vel;//转动关节为角速度，要换算为线速度
+    commands_[1]= fr_vel;//转动关节为角速度，要换算为线速度
+    commands_[2]= bl_vel;//转动关节为角速度，要换算为线速度
+    commands_[3]= br_vel;//转动关节为角速度，要换算为线速度
 
-    std::vector<double> errors;
-    for (int i = 0; i < joints_.size(); i++)
-    {
-      double error = commands_[i] - joints_[i].getVelocity();
-      errors.push_back(error);
-    }
-
+    //PID
     std::vector<double> commanded_efforts;
     for (int i = 0; i < joints_.size(); i++)
     {
-        double commanded_effort = pids_[i].computeCommand(errors[i], period);\
+        const double error = commands_[i] - joints_[i].getVelocity();
+        double commanded_effort = pids_[i].computeCommand(error, period);
         commanded_efforts.push_back(commanded_effort);
+
     }
     //发布命令
     for (int i = 0; i < joints_.size(); i++)
