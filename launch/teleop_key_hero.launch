@@ -1,0 +1,6 @@
+<launch>
+    <node name="teleop_key_hero" pkg="hero_chassis_controller" type="teleop_key_hero"
+            args="/controller/hero_chassis_controller/global_frame_mode global_frame_mode"
+            output="screen"/>
+
+  </launch>

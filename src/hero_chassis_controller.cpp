@@ -31,10 +31,6 @@ bool HeroChassisController::init(hardware_interface::EffortJointInterface *effor
     fr_pid_.init(ros::NodeHandle(controller_nh, "fr_pid"));
     bl_pid_.init(ros::NodeHandle(controller_nh, "bl_pid"));
     br_pid_.init(ros::NodeHandle(controller_nh, "br_pid"));
-    pids_.push_back(fl_pid_);
-    pids_.push_back(fr_pid_);
-    pids_.push_back(bl_pid_);
-    pids_.push_back(br_pid_);
 
     //底盘参数
     controller_nh.param("wheel_base",wheel_base_,0.4);//前后轴距
@@ -49,39 +45,6 @@ bool HeroChassisController::init(hardware_interface::EffortJointInterface *effor
     controller_nh.param("max_ang_acc_z", max_ang_acc_z_, 4.0);
     controller_nh.param("max_ang_dec_z", max_ang_dec_z_, 8.0);
     last_smoothed_cmd_ = geometry_msgs::Twist();
-
-    //joint_limits力矩限制从URDF文件读取
-    urdf::Model model;
-    if (!model.initParam("robot_description")) {
-        ROS_ERROR("Failed to parse robot description");
-        return false;
-    }
-
-    // 2. 为每个关节获取 limits
-    const std::vector<std::string> joint_names = {
-        "left_front_wheel_joint", "right_front_wheel_joint",
-        "left_back_wheel_joint",  "right_back_wheel_joint"};
-
-    for (size_t i = 0; i < joint_names.size(); ++i) {
-        joint_limits_interface::JointLimits limits;
-
-        // 3. 从 model 中获取对应的 urdf::Joint 指针
-        urdf::JointConstSharedPtr urdf_joint = model.getJoint(joint_names[i]);
-        if (!urdf_joint) {
-            ROS_WARN("Joint '%s' not found in URDF model", joint_names[i].c_str());
-            continue;
-        }
-
-        // 4. 调用 URDF 版本的 getJointLimits
-        if (joint_limits_interface::getJointLimits(urdf_joint, limits)) {
-            // 函数会自动将 URDF 中的 <limit effort="..."> 解析到 limits.max_effort
-            effort_limit_handles_.emplace_back(joints_[i], limits);
-            ROS_INFO("Joint limit enabled for %s, max_effort=%.2f",
-                     joint_names[i].c_str(), limits.max_effort);
-        } else {
-            ROS_WARN("Joint '%s' has no valid limits specification in URDF", joint_names[i].c_str());
-        }
-    }
 
     //cmd_vel速度话题订阅
     commands_.assign(4, 0.0);
@@ -116,6 +79,11 @@ void HeroChassisController::starting(const ros::Time& time)
     x_ = 0.0;
     y_ = 0.0;
     th_ = 0.0;
+    v_x_smoothed_ = 0.0;
+    v_y_smoothed_ = 0.0;
+    w_z_smoothed_ = 0.0;
+    //重置PID
+    for (auto& pid : pids_) pid->reset();
 }
 
 void HeroChassisController::dynReconfCallback(hero_chassis_controller::global_modeConfig &config,uint32_t level)
@@ -256,9 +224,9 @@ void HeroChassisController::applyVelocityLimits(geometry_msgs::Twist& cmd,const 
         const double Aw = std::abs(wz_inc)/MA;
         const double Bv = max_linear_inc/MB;
         const double Bw = max_wz_inc/MB;
-        const double theta = std::atan2(Bw,Bv) - std::atan2(Aw,Bv);
+        const double theta = std::atan2(Bw,Bv) - std::atan2(Aw,Av);
 
-        if (theta > 0.0)
+        if (theta < 0.0)
         {
             //角速度方向更陡，压缩合成直线增量，保持 vx:vy 比例
             allowed_linear_inc = max_wz_inc*linear_inc_mag/std::abs(wz_inc);
@@ -296,7 +264,7 @@ void HeroChassisController::update(const ros::Time &time, const ros::Duration &p
     geometry_msgs::Twist cmd = *raw_cmd_buffer_.readFromRT();
     applyVelocityLimits(cmd, period);
 
-    //逆运动学解算
+    //逆运动学解算:车速->轮速
     double vel_x = cmd.linear.x;
     double vel_y = cmd.linear.y;
     double vel_rad  = cmd.angular.z;
@@ -306,7 +274,7 @@ void HeroChassisController::update(const ros::Time &time, const ros::Duration &p
     double bl_vel = (vel_x + vel_y -(wheel_base_+wheel_track_)*vel_rad)/wheel_radius_;
     double br_vel = (vel_x - vel_y +(wheel_base_+wheel_track_)*vel_rad)/wheel_radius_;
 
-    ROS_INFO("轮距：%f,轴距：%f,轮半径：%f",wheel_track_,wheel_base_,wheel_radius_);
+    //ROS_INFO("轮距：%f,轴距：%f,轮半径：%f",wheel_track_,wheel_base_,wheel_radius_);
     ROS_INFO("cmd_vel: linear:[%f, %f], angular:%f", vel_x, vel_y, vel_rad);
     ROS_INFO("fl:%f, fr:%f, bl:%f, br:%f",fl_vel*wheel_radius_,fr_vel*wheel_radius_,bl_vel*wheel_radius_,br_vel*wheel_radius_);
 
@@ -321,14 +289,22 @@ void HeroChassisController::update(const ros::Time &time, const ros::Duration &p
     for (int i = 0; i < joints_.size(); i++)
     {
         const double error = commands_[i] - joints_[i].getVelocity();
-        double commanded_effort = pids_[i].computeCommand(error, period);
+        double commanded_effort = pids_[i]->computeCommand(error, period);
+        if (std::abs(commands_[i]) < 1e-4 && std::abs(joints_[i].getVelocity()) < 0.5) {
+            pids_[i]->reset();
+            commanded_effort = 0.0;
+        }
         commanded_efforts.push_back(commanded_effort);
-
     }
+
     //发布命令
     for (int i = 0; i < joints_.size(); i++)
     {
         joints_[i].setCommand(commanded_efforts[i]);
+        // ROS_INFO("关节：%s cmd=%f effort=%f vel=%f ",joints_[i].getName().c_str(),
+        //      joints_[i].getCommand(),
+        //      joints_[i].getEffort(),
+        //      joints_[i].getVelocity());
     }
     //正运动学解算+odom发布
     odom_tf(time,period);

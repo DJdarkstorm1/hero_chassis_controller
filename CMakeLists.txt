@@ -219,3 +219,8 @@ add_executable(talker_listener src/talker_listener.cpp)
 target_link_libraries(talker_listener
 ${catkin_LIBRARIES}
 )
+
+add_executable(teleop_key_hero src/teleop_key_hero.cpp)
+target_link_libraries(teleop_key_hero
+        ${catkin_LIBRARIES}
+)

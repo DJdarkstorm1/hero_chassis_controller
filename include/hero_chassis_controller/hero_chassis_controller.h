@@ -58,8 +58,7 @@ namespace hero_chassis_controller {
 
         //PID接口
         control_toolbox::Pid fl_pid_, fr_pid_, bl_pid_, br_pid_;
-        std::vector<control_toolbox::Pid> pids_;
-
+        std::array<control_toolbox::Pid*, 4> pids_ = {&fl_pid_, &fr_pid_, &bl_pid_, &br_pid_};
         //cmd_vel
         realtime_tools::RealtimeBuffer<geometry_msgs::Twist> raw_cmd_buffer_;//存获取的速度消息
         ros::Subscriber sub_command_;//订阅速度命令
@@ -95,9 +94,6 @@ namespace hero_chassis_controller {
                max_lin_dec_y_ = 4.0;//线加速度
         double max_ang_acc_z_ = 4.0, max_ang_dec_z_ = 8.0;//角加速度
         geometry_msgs::Twist last_smoothed_cmd_;//记录上一次平滑处理后的命令
-        //关节限制
-        std::vector<joint_limits_interface::EffortJointSaturationHandle> effort_limit_handles_;
-
 
         //======================函数===================
         //速度订阅回调函数
