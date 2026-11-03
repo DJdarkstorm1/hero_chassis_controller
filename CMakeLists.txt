@@ -19,6 +19,8 @@ find_package(catkin REQUIRED COMPONENTS
         tf2_ros
         geometry_msgs
         dynamic_reconfigure
+        urdf
+        joint_limits_interface
 )
 
 ## System dependencies are found with CMake's conventions
@@ -216,4 +218,9 @@ target_link_libraries(hero_chassis_controller
 add_executable(talker_listener src/talker_listener.cpp)
 target_link_libraries(talker_listener
 ${catkin_LIBRARIES}
+)
+
+add_executable(teleop_key_hero src/teleop_key_hero.cpp)
+target_link_libraries(teleop_key_hero
+        ${catkin_LIBRARIES}
 )

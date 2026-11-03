@@ -8,7 +8,11 @@
 #include <control_toolbox/pid.h>
 #include <controller_interface/controller.h>
 #include <hardware_interface/joint_command_interface.h>
+#include <joint_limits_interface/joint_limits.h>
+#include <joint_limits_interface/joint_limits_rosparam.h>
+#include <joint_limits_interface/joint_limits_interface.h>
 #include <geometry_msgs/Twist.h>
+#include <realtime_tools/realtime_buffer.h>
 #include <nav_msgs/Odometry.h>
 #include <vector>
 #include <string>
@@ -31,62 +35,75 @@ namespace hero_chassis_controller {
 
         bool init(hardware_interface::EffortJointInterface *effort_joint_interface,
                   ros::NodeHandle &root_nh, ros::NodeHandle &controller_nh) override;
-
+        //插件管理器循环调用的函数
         void update(const ros::Time &time, const ros::Duration &period) override;
+        //掉线重新加载的开始函数
+        void starting(const ros::Time& time) override;
 
-        void cmdVelCallback(const geometry_msgs::Twist &msg);
+    private:
 
-        void odom_tf(const ros::Time &time, const ros::Duration &period);
-
-        void dynReconfCallback(hero_chassis_controller::global_modeConfig &config,uint32_t level);
-
+        //关节接口
         hardware_interface::JointHandle front_left_joint_,
                                         front_right_joint_,
                                         back_left_joint_,
                                         back_right_joint_;
         std::vector<hardware_interface::JointHandle> joints_;
+
         std::vector<double> commands_{0.0, 0.0, 0.0, 0.0}; //最新速度命令
 
+        //底盘参数
+        double wheel_base_ = 0.4;//前后轴距
+        double wheel_radius_ = 0.07625;//轮子半径
+        double wheel_track_ = 0.04;//左右轮距
 
-    private:
-        //机器人基本参数
-        double wheel_base_;//前后轴距
-        double wheel_radius_;//轮子半径
-        double wheel_track_;//左右轮距
-
-
+        //PID接口
         control_toolbox::Pid fl_pid_, fr_pid_, bl_pid_, br_pid_;
-        std::vector<control_toolbox::Pid> pids_;
+        std::array<control_toolbox::Pid*, 4> pids_ = {&fl_pid_, &fr_pid_, &bl_pid_, &br_pid_};
+        //cmd_vel
+        realtime_tools::RealtimeBuffer<geometry_msgs::Twist> raw_cmd_buffer_;//存获取的速度消息
+        ros::Subscriber sub_command_;//订阅速度命令
 
-        //订阅速度命令
-        ros::Subscriber sub_command_;
-
-        //odom
+        //odom里程计
         std::vector<double> w_;//四个轮子角速度
-        //正运动学解算的位置
-        double x_ = 0.0;//记录位置
+        double x_ = 0.0;//正运动学解算的位置
         double y_ = 0.0;
         double th_ = 0.0;
-        //低通滤波参数
-        double alpha_ = 0.2; // (0,1) 越小越平滑,延迟越大
+        double alpha_ = 0.2; // 低通滤波参数：(0,1) 越小越平滑,延迟越大
         double v_x_smoothed_ = 0.0;
         double v_y_smoothed_ = 0.0;
         double w_z_smoothed_ = 0.0;
-
-        //发布odom话题
-        ros::Publisher odom_pub_ ;
+        ros::Publisher odom_pub_ ;//发布odom里程计话题
         tf2_ros::TransformBroadcaster odom_broadcaster_;
 
-        //底盘/全局
+        //底盘/全局模式变换
         bool global_frame_mode_ = false;
         std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
         std::unique_ptr<tf2_ros::TransformListener> tf_listener_;
         std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
-        std::string odom_frame_;
-        std::string base_frame_;
-        //动态参数调节模式
+        std::string odom_frame_ = "odom";
+        std::string base_frame_ = "base_link";
+
+        //动态参数调节底盘/全局模式
         std::unique_ptr<dynamic_reconfigure::Server<
             hero_chassis_controller::global_modeConfig>> dyn_server_;
+
+        //底盘加速度限制
+        double max_lin_acc_x_ = 2.0,
+               max_lin_acc_y_ = 2.0,
+               max_lin_dec_x_ = 4.0,
+               max_lin_dec_y_ = 4.0;//线加速度
+        double max_ang_acc_z_ = 4.0, max_ang_dec_z_ = 8.0;//角加速度
+        geometry_msgs::Twist last_smoothed_cmd_;//记录上一次平滑处理后的命令
+
+        //======================函数===================
+        //速度订阅回调函数
+        void cmdVelCallback(const geometry_msgs::Twist &msg);
+        //base_link到odom里程计发布函数
+        void odom_tf(const ros::Time &time, const ros::Duration &period);
+        //动态参数回调函数
+        void dynReconfCallback(hero_chassis_controller::global_modeConfig &config,uint32_t level);
+        //加速度限制
+        void applyVelocityLimits(geometry_msgs::Twist& cmd, const ros::Duration& period);
     };
 }// namespace hero_chassis_controller
 
