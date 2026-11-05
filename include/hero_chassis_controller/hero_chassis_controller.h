@@ -25,6 +25,7 @@
 #include <dynamic_reconfigure/server.h>
 #include <hero_chassis_controller/global_modeConfig.h>
 
+#include "hero_chassis_controller/power_msgs.h"
 namespace hero_chassis_controller {
 
     class HeroChassisController : public controller_interface::Controller<hardware_interface::EffortJointInterface>
@@ -95,6 +96,16 @@ namespace hero_chassis_controller {
         double max_ang_acc_z_ = 4.0, max_ang_dec_z_ = 8.0;//角加速度
         geometry_msgs::Twist last_smoothed_cmd_;//记录上一次平滑处理后的命令
 
+        //底盘功率控制
+        double max_Power_ = 0.0;//最大功率限制
+        double scale_k_ = 1.0;//限制系数
+        double in_Power_ = 0.0;//输入功率
+        double out_Power_ = 0.0;//输出功率
+        std::vector<double> commanded_efforts_;//pid的原始力矩
+        hero_chassis_controller::power_msgs power_msg_;
+        ros::Publisher power_pub_;
+
+
         //======================函数===================
         //速度订阅回调函数
         void cmdVelCallback(const geometry_msgs::Twist &msg);
@@ -104,6 +115,8 @@ namespace hero_chassis_controller {
         void dynReconfCallback(hero_chassis_controller::global_modeConfig &config,uint32_t level);
         //加速度限制
         void applyVelocityLimits(geometry_msgs::Twist& cmd, const ros::Duration& period);
+        //底盘功率控制
+        void PowerLimit();
     };
 }// namespace hero_chassis_controller
 

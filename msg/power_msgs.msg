@@ -1,0 +1,2 @@
+float64 max_power
+float64 power

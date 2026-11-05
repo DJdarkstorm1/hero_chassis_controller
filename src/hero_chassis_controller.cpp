@@ -68,6 +68,11 @@ bool HeroChassisController::init(hardware_interface::EffortJointInterface *effor
     dyn_server_->setCallback(
       boost::bind(&HeroChassisController::dynReconfCallback, this, _1, _2));
 
+    //底盘功率控制
+    controller_nh.param("max_Power",max_Power_,100.0);//前后轴距
+    commanded_efforts_.assign(4, 0.0);
+    power_pub_ = controller_nh.advertise<hero_chassis_controller::power_msgs>("power",10);
+
     return true;
 }
 
@@ -136,12 +141,12 @@ void HeroChassisController::odom_tf(const ros::Time &time, const ros::Duration &
     odom.pose.pose.position.z = 0.0;
     odom.pose.pose.orientation = odom_quat;
     // 设置速度(加了滤波)
-    v_x_smoothed_ = alpha_ * v_x + (1.0 - alpha_) * v_x_smoothed_;
-    v_y_smoothed_ = alpha_ * v_y + (1.0 - alpha_) * v_y_smoothed_;
-    w_z_smoothed_ = alpha_ * w_z + (1.0 - alpha_) * w_z_smoothed_;
-    odom.twist.twist.linear.x  = v_x_smoothed_;
-    odom.twist.twist.linear.y  = v_y_smoothed_;
-    odom.twist.twist.angular.z = w_z_smoothed_;//w_z;
+    // v_x_smoothed_ = alpha_ * v_x + (1.0 - alpha_) * v_x_smoothed_;
+    // v_y_smoothed_ = alpha_ * v_y + (1.0 - alpha_) * v_y_smoothed_;
+    // w_z_smoothed_ = alpha_ * w_z + (1.0 - alpha_) * w_z_smoothed_;
+    odom.twist.twist.linear.x  = v_x;
+    odom.twist.twist.linear.y  = v_y;
+    odom.twist.twist.angular.z = w_z;
 
     // 发布消息
     odom_pub_.publish(odom);
@@ -257,6 +262,65 @@ void HeroChassisController::applyVelocityLimits(geometry_msgs::Twist& cmd,const 
 
 }
 
+void HeroChassisController::PowerLimit()
+{
+    //ROS_INFO("power limit");
+    double k1 = 0.01;//发热铜损系数
+    double k2 = 0.01;//铁损系数
+
+    out_Power_ = 0.0;
+    double totol_cmd_torque = 0.0;
+    double totol_w = 0.0;
+    for (int i=0; i<commanded_efforts_.size(); i++) {
+        out_Power_ += std::abs(commanded_efforts_[i] * joints_[i].getVelocity());
+        totol_cmd_torque += commanded_efforts_[i]/19 * commanded_efforts_[i]/19;
+        totol_w += joints_[i].getVelocity()*19 *joints_[i].getVelocity()*19;
+    }
+    ROS_INFO("joint_vel:[%.2f, %.2f, %.2f, %.2f]",joints_[0].getVelocity(),joints_[1].getVelocity(),joints_[2].getVelocity(),joints_[3].getVelocity());
+
+    ROS_INFO("cmd_tau:[%.2f, %.2f, %.2f, %.2f]",commanded_efforts_[0],commanded_efforts_[1],commanded_efforts_[2],commanded_efforts_[3]);
+    in_Power_ = out_Power_ + k1 * totol_cmd_torque + k2 * totol_w;
+
+    if (in_Power_ > max_Power_) {
+        double A = k1 * totol_cmd_torque;
+        double B = out_Power_;
+        double C = k2 * totol_w - max_Power_;
+
+        // 计算判别式 Δ = B^2 - 4AC
+        double delta = B * B - 4.0 * A * C;
+
+        // 防止分母为 0 (A 为 0 说明所有力矩指令为 0)，且保证根号下非负
+        if (std::abs(A) > 1e-6 && delta >= 0.0) {
+            scale_k_ = (-B + std::sqrt(delta)) / (2.0 * A);
+
+            // 防止浮点数误差导致 k 大于 1 或小于 0
+            if (scale_k_ > 1.0) scale_k_ = 1.0;
+            if (scale_k_ < 0.0) scale_k_ = 0.0;
+        } else {
+            // 如果无解，直接切断动力
+            scale_k_ = 0.0;
+        }
+
+        // for (double & commanded_effort : commanded_efforts_) {
+        //     commanded_effort *= scale_k_;
+        // }
+    }
+
+    out_Power_ = 0.0;
+    totol_cmd_torque = 0.0;
+    totol_w = 0.0;
+    for (int i=0; i<commanded_efforts_.size(); i++) {
+        out_Power_ += std::abs(commanded_efforts_[i] * joints_[i].getVelocity());
+        totol_cmd_torque += commanded_efforts_[i]/19 * commanded_efforts_[i]/19;
+        totol_w += joints_[i].getVelocity()*19 *joints_[i].getVelocity()*19;
+    }
+    in_Power_ = out_Power_ + k1 * totol_cmd_torque + k2 * totol_w;
+
+    power_msg_.power = in_Power_;
+    power_msg_.max_power = max_Power_;
+    power_pub_.publish(power_msg_);
+}
+
 void HeroChassisController::update(const ros::Time &time, const ros::Duration &period) {
     if (joints_.empty()) return;
 
@@ -285,22 +349,24 @@ void HeroChassisController::update(const ros::Time &time, const ros::Duration &p
     commands_[3]= br_vel;//转动关节为角速度，要换算为线速度
 
     //PID
-    std::vector<double> commanded_efforts;
     for (int i = 0; i < joints_.size(); i++)
     {
         const double error = commands_[i] - joints_[i].getVelocity();
         double commanded_effort = pids_[i]->computeCommand(error, period);
-        if (std::abs(commands_[i]) < 1e-4 && std::abs(joints_[i].getVelocity()) < 0.5) {
+        //死区
+        if (std::abs(commands_[i]) < 1e-4 && std::abs(joints_[i].getVelocity()) < 0.5) {//
             pids_[i]->reset();
             commanded_effort = 0.0;
         }
-        commanded_efforts.push_back(commanded_effort);
+        if (commanded_effort > 5.0) commanded_effort = 5.0;
+        if (commanded_effort < -5.0) commanded_effort = -5.0;
+        commanded_efforts_[i] = commanded_effort;
     }
-
+    PowerLimit();
     //发布命令
     for (int i = 0; i < joints_.size(); i++)
     {
-        joints_[i].setCommand(commanded_efforts[i]);
+        joints_[i].setCommand(commanded_efforts_[i]);
         // ROS_INFO("关节：%s cmd=%f effort=%f vel=%f ",joints_[i].getName().c_str(),
         //      joints_[i].getCommand(),
         //      joints_[i].getEffort(),
