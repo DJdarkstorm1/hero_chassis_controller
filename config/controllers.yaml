@@ -39,8 +39,12 @@ controller:
     max_effort: 5.0
 
     # 底盘最大功率
-    max_Power: 100.0
+    max_Power: 1000.0
 
   joint_state_controller:
     type: joint_state_controller/JointStateController
     publish_rate: 50
+
+  imu_sensor_controller:
+    type: imu_sensor_controller/ImuSensorController  # 必须与插件类名完全一致[reference:0]
+    publish_rate: 50.0

@@ -26,6 +26,10 @@
 #include <hero_chassis_controller/global_modeConfig.h>
 
 #include "hero_chassis_controller/power_msgs.h"
+#include <hardware_interface/imu_sensor_interface.h>
+#include <sensor_msgs/Imu.h>
+
+
 namespace hero_chassis_controller {
 
     class HeroChassisController : public controller_interface::Controller<hardware_interface::EffortJointInterface>
@@ -105,6 +109,13 @@ namespace hero_chassis_controller {
         hero_chassis_controller::power_msgs power_msg_;
         ros::Publisher power_pub_;
 
+        // ---- Joint Limits ----
+        std::vector<joint_limits_interface::EffortJointSaturationHandle> effort_limit_handles_;
+
+        //IMU
+        ros::Subscriber imu_sub_;
+        realtime_tools::RealtimeBuffer<sensor_msgs::Imu> imu_rt_buffer_; // 实时缓冲区
+        sensor_msgs::Imu current_imu_data_;
 
         //======================函数===================
         //速度订阅回调函数
@@ -117,6 +128,8 @@ namespace hero_chassis_controller {
         void applyVelocityLimits(geometry_msgs::Twist& cmd, const ros::Duration& period);
         //底盘功率控制
         void PowerLimit();
+        //IMU
+        void imuCallback(const sensor_msgs::ImuConstPtr &msg);
     };
 }// namespace hero_chassis_controller
 
