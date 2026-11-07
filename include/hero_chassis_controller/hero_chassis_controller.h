@@ -8,8 +8,6 @@
 #include <control_toolbox/pid.h>
 #include <controller_interface/controller.h>
 #include <hardware_interface/joint_command_interface.h>
-#include <joint_limits_interface/joint_limits.h>
-#include <joint_limits_interface/joint_limits_rosparam.h>
 #include <joint_limits_interface/joint_limits_interface.h>
 #include <geometry_msgs/Twist.h>
 #include <realtime_tools/realtime_buffer.h>
@@ -28,7 +26,6 @@
 #include "hero_chassis_controller/power_msgs.h"
 #include <hardware_interface/imu_sensor_interface.h>
 #include <sensor_msgs/Imu.h>
-
 
 namespace hero_chassis_controller {
 
@@ -108,6 +105,7 @@ namespace hero_chassis_controller {
         std::vector<double> commanded_efforts_;//pid的原始力矩
         hero_chassis_controller::power_msgs power_msg_;
         ros::Publisher power_pub_;
+        double filtered_power_ = 0.0;//一阶低通滤波
 
         // ---- Joint Limits ----
         std::vector<joint_limits_interface::EffortJointSaturationHandle> effort_limit_handles_;

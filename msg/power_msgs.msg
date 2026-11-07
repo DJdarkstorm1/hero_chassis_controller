@@ -1,2 +1,3 @@
 float64 max_power
-float64 power
+float64 limited_power
+float64 ori_power

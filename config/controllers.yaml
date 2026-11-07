@@ -2,23 +2,23 @@ controller:
   hero_chassis_controller:
     type: hero_chassis_controller/HeroChassisController
     fl_pid:
-      p: 10.0
-      i: 0.0
+      p: 7.0
+      i: 2.1
       d: 0.0
       i_clamp: 1.0
     fr_pid:
-      p: 10.0
-      i: 0.0
+      p: 7.0
+      i: 2.1
       d: 0.0
       i_clamp: 1.0
     bl_pid:
-      p: 10.0
-      i: 0.0
+      p: 7.0
+      i: 2.1
       d: 0.0
       i_clamp: 1.0
     br_pid:
-      p: 10.0
-      i: 0.0
+      p: 7.0
+      i: 2.1
       d: 0.0
       i_clamp: 1.0
     odom_frame: odom
@@ -44,7 +44,3 @@ controller:
   joint_state_controller:
     type: joint_state_controller/JointStateController
     publish_rate: 50
-
-  imu_sensor_controller:
-    type: imu_sensor_controller/ImuSensorController  # 必须与插件类名完全一致[reference:0]
-    publish_rate: 50.0

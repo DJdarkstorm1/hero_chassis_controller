@@ -17,14 +17,6 @@ bool HeroChassisController::init(hardware_interface::EffortJointInterface *effor
     setlocale(LC_ALL, "");
     //关节力控接口
     //0:fl 1:fr 2:bl 3br
-    // joint_limits_interface::JointLimits limits;
-    // limits.max_acceleration;
-    // joint_limits_interface::SoftJointLimits soft_limits;
-    // soft_limits.;
-    // joint_limits_interface::EffortJointSaturationInterface effort_saturation;
-    // effort_saturation.;
-    // hardware_interface::ImuSensorInterface hero_imu;
-    // hero_imu.getHandle("hero_imu");
     front_left_joint_ =
       effort_joint_interface->getHandle("left_front_wheel_joint");
     front_right_joint_ =
@@ -36,10 +28,11 @@ bool HeroChassisController::init(hardware_interface::EffortJointInterface *effor
     joints_ = {front_left_joint_,front_right_joint_,back_left_joint_,back_right_joint_};
 
     //初始化PID
-    fl_pid_.init(ros::NodeHandle(controller_nh, "fl_pid"));
-    fr_pid_.init(ros::NodeHandle(controller_nh, "fr_pid"));
-    bl_pid_.init(ros::NodeHandle(controller_nh, "bl_pid"));
-    br_pid_.init(ros::NodeHandle(controller_nh, "br_pid"));
+    //TODO：记得改这里的参数
+    fl_pid_.init(ros::NodeHandle(controller_nh, "fl_pid"));//fl_pid
+    fr_pid_.init(ros::NodeHandle(controller_nh, "fl_pid"));//fr_pid
+    bl_pid_.init(ros::NodeHandle(controller_nh, "fl_pid"));//bl_pid
+    br_pid_.init(ros::NodeHandle(controller_nh, "fl_pid"));//br_pid
 
     //底盘参数
     controller_nh.param("wheel_base",wheel_base_,0.4);//前后轴距
@@ -87,8 +80,6 @@ bool HeroChassisController::init(hardware_interface::EffortJointInterface *effor
     std::string imu_topic;
     controller_nh.param<std::string>("imu_topic", imu_topic, "/imu/data");
     imu_sub_ = controller_nh.subscribe(imu_topic, 1, &HeroChassisController::imuCallback, this);
-
-    ROS_INFO_STREAM("HeroChassisController: Subscribing to IMU topic: " << imu_topic);
 
     // 3. 初始化实时缓冲区 (可选：设置一个默认值)
     imu_rt_buffer_.writeFromNonRT(sensor_msgs::Imu());
@@ -166,12 +157,12 @@ void HeroChassisController::odom_tf(const ros::Time &time, const ros::Duration &
     odom.pose.pose.position.z = 0.0;
     odom.pose.pose.orientation = odom_quat;
     // 设置速度(加了滤波)
-    // v_x_smoothed_ = alpha_ * v_x + (1.0 - alpha_) * v_x_smoothed_;
-    // v_y_smoothed_ = alpha_ * v_y + (1.0 - alpha_) * v_y_smoothed_;
-    // w_z_smoothed_ = alpha_ * w_z + (1.0 - alpha_) * w_z_smoothed_;
-    odom.twist.twist.linear.x  = v_x;
-    odom.twist.twist.linear.y  = v_y;
-    odom.twist.twist.angular.z = w_z;
+    v_x_smoothed_ = alpha_ * v_x + (1.0 - alpha_) * v_x_smoothed_;
+    v_y_smoothed_ = alpha_ * v_y + (1.0 - alpha_) * v_y_smoothed_;
+    w_z_smoothed_ = alpha_ * w_z + (1.0 - alpha_) * w_z_smoothed_;
+    odom.twist.twist.linear.x  = v_x_smoothed_;//v_x;
+    odom.twist.twist.linear.y  = v_y_smoothed_;//v_y;
+    odom.twist.twist.angular.z = w_z_smoothed_;//w_z;
 
     // 发布消息
     odom_pub_.publish(odom);
@@ -306,6 +297,10 @@ void HeroChassisController::PowerLimit()
     //ROS_INFO("cmd_tau:[%.2f, %.2f, %.2f, %.2f]",commanded_efforts_[0],commanded_efforts_[1],commanded_efforts_[2],commanded_efforts_[3]);
     in_Power_ = out_Power_ + k1 * totol_cmd_torque + k2 * totol_w;
 
+    power_msg_.ori_power = in_Power_;//原始功率
+
+    double alpha = 0.2; // 滤波系数
+    filtered_power_ = alpha * in_Power_ + (1.0 - alpha) * filtered_power_;
     if (in_Power_ > max_Power_) {
         double A = k1 * totol_cmd_torque;
         double B = out_Power_;
@@ -341,8 +336,8 @@ void HeroChassisController::PowerLimit()
     }
     in_Power_ = out_Power_ + k1 * totol_cmd_torque + k2 * totol_w;
 
-    power_msg_.power = in_Power_;
-    power_msg_.max_power = max_Power_;
+    power_msg_.limited_power = in_Power_;//限制功率
+    power_msg_.max_power = max_Power_;//最大功率
     power_pub_.publish(power_msg_);
 }
 
@@ -358,7 +353,7 @@ void HeroChassisController::update(const ros::Time &time, const ros::Duration &p
     if (imu_ptr) {
         current_imu_data_ = *imu_ptr; // 拷贝到本地，避免在后续计算中被回调线程修改
     }
-    ROS_INFO_STREAM_THROTTLE(1.0, "IMU angular velocity Z: " << current_imu_data_.angular_velocity.z);
+    //ROS_INFO_STREAM_THROTTLE(1.0, "IMU angular velocity Z: " << current_imu_data_.angular_velocity.z);
 
 
     //逆运动学解算:车速->轮速
@@ -371,7 +366,7 @@ void HeroChassisController::update(const ros::Time &time, const ros::Duration &p
     double bl_vel = (vel_x + vel_y -(wheel_base_+wheel_track_)/2*vel_rad)/wheel_radius_;
     double br_vel = (vel_x - vel_y +(wheel_base_+wheel_track_)/2*vel_rad)/wheel_radius_;
 
-    //ROS_INFO("轮距：%f,轴距：%f,轮半径：%f",wheel_track_,wheel_base_,wheel_radius_);
+    // ROS_INFO("轮距：%f,轴距：%f,轮半径：%f",wheel_track_,wheel_base_,wheel_radius_);
     // ROS_INFO("cmd_vel: linear:[%f, %f], angular:%f", vel_x, vel_y, vel_rad);
     // ROS_INFO("fl:%f, fr:%f, bl:%f, br:%f",fl_vel*wheel_radius_,fr_vel*wheel_radius_,bl_vel*wheel_radius_,br_vel*wheel_radius_);
 
@@ -391,8 +386,6 @@ void HeroChassisController::update(const ros::Time &time, const ros::Duration &p
             pids_[i]->reset();
             commanded_effort = 0.0;
         }
-        if (commanded_effort > 5.0) commanded_effort = 5.0;
-        if (commanded_effort < -5.0) commanded_effort = -5.0;
         commanded_efforts_[i] = commanded_effort;
     }
 
@@ -402,16 +395,7 @@ void HeroChassisController::update(const ros::Time &time, const ros::Duration &p
     //发布命令
     for (int i = 0; i < joints_.size(); i++)
     {
-        //刹车
-        if (commands_[i]<1e-5) {
-            double current_wheel_vel_ = joints_[i].getVelocity();
-            double target_wheel_vel_ = commands_[i];
-            double kd = 2.0; // 阻尼系数，按轮子惯量调
-            double brake_torque = -kd * (current_wheel_vel_ - target_wheel_vel_);
-            joints_[i].setCommand(brake_torque);
-        }
-        else
-            joints_[i].setCommand(commanded_efforts_[i]);
+        joints_[i].setCommand(commanded_efforts_[i]);
         // ROS_INFO("关节：%s cmd=%f effort=%f vel=%f ",joints_[i].getName().c_str(),
         //      joints_[i].getCommand(),
         //      joints_[i].getEffort(),
