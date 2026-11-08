@@ -7,8 +7,6 @@
 
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
-#include <urdf/model.h>
-#include <joint_limits_interface/joint_limits_urdf.h>
 
 
 namespace hero_chassis_controller {
@@ -28,7 +26,7 @@ bool HeroChassisController::init(hardware_interface::EffortJointInterface *effor
     joints_ = {front_left_joint_,front_right_joint_,back_left_joint_,back_right_joint_};
 
     //初始化PID
-    //TODO：记得改这里的参数
+
     fl_pid_.init(ros::NodeHandle(controller_nh, "fl_pid"));//fl_pid
     fr_pid_.init(ros::NodeHandle(controller_nh, "fl_pid"));//fr_pid
     bl_pid_.init(ros::NodeHandle(controller_nh, "fl_pid"));//bl_pid
@@ -80,7 +78,6 @@ bool HeroChassisController::init(hardware_interface::EffortJointInterface *effor
     std::string imu_topic;
     controller_nh.param<std::string>("imu_topic", imu_topic, "/imu/data");
     imu_sub_ = controller_nh.subscribe(imu_topic, 1, &HeroChassisController::imuCallback, this);
-
     // 3. 初始化实时缓冲区 (可选：设置一个默认值)
     imu_rt_buffer_.writeFromNonRT(sensor_msgs::Imu());
 
@@ -278,7 +275,7 @@ void HeroChassisController::applyVelocityLimits(geometry_msgs::Twist& cmd,const 
 
 }
 
-void HeroChassisController::PowerLimit()
+void HeroChassisController::powerLimit()
 {
     //ROS_INFO("power limit");
     double k1 = 0.01;//发热铜损系数
@@ -390,8 +387,7 @@ void HeroChassisController::update(const ros::Time &time, const ros::Duration &p
     }
 
 
-
-    PowerLimit();
+    powerLimit();
     //发布命令
     for (int i = 0; i < joints_.size(); i++)
     {

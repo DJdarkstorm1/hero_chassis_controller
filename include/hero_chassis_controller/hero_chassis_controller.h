@@ -18,7 +18,6 @@
 #include <tf2_ros/transform_listener.h>
 #include <tf2_ros/transform_broadcaster.h>
 #include <tf2/LinearMath/Vector3.h>
-#include <tf2/LinearMath/Quaternion.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 #include <dynamic_reconfigure/server.h>
 #include <hero_chassis_controller/global_modeConfig.h>
@@ -56,7 +55,7 @@ namespace hero_chassis_controller {
         //底盘参数
         double wheel_base_ = 0.4;//前后轴距
         double wheel_radius_ = 0.07625;//轮子半径
-        double wheel_track_ = 0.04;//左右轮距
+        double wheel_track_ = 0.4;//左右轮距
 
         //PID接口
         control_toolbox::Pid fl_pid_, fr_pid_, bl_pid_, br_pid_;
@@ -96,6 +95,7 @@ namespace hero_chassis_controller {
                max_lin_dec_y_ = 4.0;//线加速度
         double max_ang_acc_z_ = 4.0, max_ang_dec_z_ = 8.0;//角加速度
         geometry_msgs::Twist last_smoothed_cmd_;//记录上一次平滑处理后的命令
+        double filtered_vel_[4] = {0.0, 0.0, 0.0, 0.0};
 
         //底盘功率控制
         double max_Power_ = 0.0;//最大功率限制
@@ -106,9 +106,6 @@ namespace hero_chassis_controller {
         hero_chassis_controller::power_msgs power_msg_;
         ros::Publisher power_pub_;
         double filtered_power_ = 0.0;//一阶低通滤波
-
-        // ---- Joint Limits ----
-        std::vector<joint_limits_interface::EffortJointSaturationHandle> effort_limit_handles_;
 
         //IMU
         ros::Subscriber imu_sub_;
@@ -125,7 +122,7 @@ namespace hero_chassis_controller {
         //加速度限制
         void applyVelocityLimits(geometry_msgs::Twist& cmd, const ros::Duration& period);
         //底盘功率控制
-        void PowerLimit();
+        void powerLimit();
         //IMU
         void imuCallback(const sensor_msgs::ImuConstPtr &msg);
     };
